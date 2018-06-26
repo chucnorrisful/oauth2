@@ -6,7 +6,7 @@
 // OAuth2 authorized and authenticated HTTP requests,
 // as specified in RFC 6749.
 // It can additionally grant authorization with Bearer JWT.
-package oauth2 // import "golang.org/x/oauth2"
+package oauth2 //
 
 import (
 	"bytes"
@@ -18,8 +18,8 @@ import (
 
 	"golang.org/x/net/context"
 	"github.com/chucnorrisful/oauth2/internal"
-	"golang.org/x/oauth2"
 	"fmt"
+	"github.com/astaxie/beego/orm"
 )
 
 // NoContext is the default context you should supply if not using
@@ -215,6 +215,10 @@ func (c *Config) Client(ctx context.Context, t *Token) *http.Client {
 	return NewClient(ctx, c.TokenSource(ctx, t))
 }
 
+func (c *Config) NotifyClient(ctx context.Context, t *Token, fu TokenNotifyFunc, source orm.Ormer) *http.Client {
+	return NewNotifyClient(ctx, c.TokenSource(ctx, t), fu, source)
+}
+
 // TokenSource returns a TokenSource that returns t until t expires,
 // automatically refreshing it as necessary using the provided context.
 //
@@ -334,6 +338,18 @@ func NewClient(ctx context.Context, src TokenSource) *http.Client {
 	}
 }
 
+func NewNotifyClient(ctx context.Context, src TokenSource, fu TokenNotifyFunc, source orm.Ormer) *http.Client {
+	if src == nil {
+		return internal.ContextClient(ctx)
+	}
+	return &http.Client{
+		Transport: &Transport{
+			Base:   internal.ContextClient(ctx).Transport,
+			Source: ReuseNotifyTokenSource(nil, src, fu, source),
+		},
+	}
+}
+
 // ReuseTokenSource returns a TokenSource which repeatedly returns the
 // same token as long as it's valid, starting with t.
 // When its cached token is invalid, a new token is obtained from src.
@@ -363,22 +379,42 @@ func ReuseTokenSource(t *Token, src TokenSource) TokenSource {
 	}
 }
 
+func ReuseNotifyTokenSource(t *Token, src TokenSource, fu TokenNotifyFunc, sou orm.Ormer) TokenSource {
+	// Don't wrap a reuseTokenSource in itself. That would work,
+	// but cause an unnecessary number of mutex operations.
+	// Just build the equivalent one.
+	if rt, ok := src.(*reuseTokenSource); ok {
+		if t == nil {
+			// Just use it directly.
+			return rt
+		}
+		src = rt.new
+	}
+	return &NotifyRefreshTokenSource{
+		t:   t,
+		new: src,
+		f: fu,
+		source: sou,
+	}
+}
+
 // TokenNotifyFunc is a function that accepts an oauth2 Token upon refresh, and
 // returns an error if it should not be used.
-type TokenNotifyFunc func(*oauth2.Token) error
+type TokenNotifyFunc func(*Token, orm.Ormer) error
 
 // NotifyRefreshTokenSource is essentially `oauth2.ResuseTokenSource` with `TokenNotifyFunc` added.
 type NotifyRefreshTokenSource struct {
-	new oauth2.TokenSource
+	source orm.Ormer
+	new TokenSource
 	mu  sync.Mutex // guards t
-	t   *oauth2.Token
+	t   *Token
 	f   TokenNotifyFunc // called when token refreshed so new refresh token can be persisted
 }
 
 // Token returns the current token if it's still valid, else will
 // refresh the current token (using r.Context for HTTP client
 // information) and return the new one.
-func (s *NotifyRefreshTokenSource) Token() (*oauth2.Token, error) {
+func (s *NotifyRefreshTokenSource) Token() (*Token, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.t.Valid() {
@@ -390,5 +426,5 @@ func (s *NotifyRefreshTokenSource) Token() (*oauth2.Token, error) {
 		return nil, err
 	}
 	s.t = t
-	return t, s.f(t)
+	return t, s.f(t, s.source)
 }

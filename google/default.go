@@ -15,7 +15,7 @@ import (
 
 	"cloud.google.com/go/compute/metadata"
 	"golang.org/x/net/context"
-	"golang.org/x/oauth2"
+	"github.com/chucnorrisful/oauth2"
 )
 
 // DefaultClient returns an HTTP Client that uses the
