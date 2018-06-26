@@ -17,7 +17,9 @@ import (
 	"sync"
 
 	"golang.org/x/net/context"
-	"golang.org/x/oauth2/internal"
+	"github.com/chucnorrisful/oauth2/internal"
+	"golang.org/x/oauth2"
+	"fmt"
 )
 
 // NoContext is the default context you should supply if not using
@@ -359,4 +361,34 @@ func ReuseTokenSource(t *Token, src TokenSource) TokenSource {
 		t:   t,
 		new: src,
 	}
+}
+
+// TokenNotifyFunc is a function that accepts an oauth2 Token upon refresh, and
+// returns an error if it should not be used.
+type TokenNotifyFunc func(*oauth2.Token) error
+
+// NotifyRefreshTokenSource is essentially `oauth2.ResuseTokenSource` with `TokenNotifyFunc` added.
+type NotifyRefreshTokenSource struct {
+	new oauth2.TokenSource
+	mu  sync.Mutex // guards t
+	t   *oauth2.Token
+	f   TokenNotifyFunc // called when token refreshed so new refresh token can be persisted
+}
+
+// Token returns the current token if it's still valid, else will
+// refresh the current token (using r.Context for HTTP client
+// information) and return the new one.
+func (s *NotifyRefreshTokenSource) Token() (*oauth2.Token, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.t.Valid() {
+		fmt.Println("returning existing token")
+		return s.t, nil
+	}
+	t, err := s.new.Token()
+	if err != nil {
+		return nil, err
+	}
+	s.t = t
+	return t, s.f(t)
 }
