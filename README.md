@@ -1,3 +1,5 @@
+# Fork of https://github.com/golang/oauth2 to add a TokenSource, that can take a handleFunc to persist the OAuth2 refresh token on change.
+
 # OAuth2 for Go
 
 [![Build Status](https://travis-ci.org/golang/oauth2.svg?branch=master)](https://travis-ci.org/golang/oauth2)
